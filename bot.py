@@ -8,19 +8,6 @@ from flask import Flask, request, jsonify, render_template
 from threading import Thread
 from flask_basicauth import BasicAuth
 
-# Load environment variables
-SONARR_API_KEY = os.getenv("SONARR_API_KEY", "your_sonarr_api_key")
-RADARR_API_KEY = os.getenv("RADARR_API_KEY", "your_radarr_api_key")
-DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "your_discord_bot_token")
-
-SONARR_URL = os.getenv("SONARR_URL", "http://localhost:8989")
-RADARR_URL = os.getenv("RADARR_URL", "http://localhost:7878")
-
-# Setup Discord Bot
-intents = discord.Intents.default()
-intents.messages = True
-bot = commands.Bot(command_prefix="!", intents=intents)
-
 # Database setup
 conn = sqlite3.connect("requests.db", check_same_thread=False)
 cursor = conn.cursor()
@@ -34,6 +21,50 @@ cursor.execute("""
     )
 """)
 conn.commit()
+
+# Flask Web UI for Configuration and Logging
+app = Flask(__name__)
+app.config['BASIC_AUTH_USERNAME'] = "admin"
+app.config['BASIC_AUTH_PASSWORD'] = "admin"
+basic_auth = BasicAuth(app)
+
+@app.route("/config", methods=["POST"])
+@basic_auth.required
+def update_config():
+    data = request.json
+    with open("config.json", "w") as config_file:
+        json.dump(data, config_file)
+    return jsonify({"message": "Configuration updated successfully"})
+
+@app.route("/config", methods=["GET"])
+@basic_auth.required
+def get_config():
+    if os.path.exists("config.json"):
+        with open("config.json", "r") as config_file:
+            data = json.load(config_file)
+            return jsonify(data)
+    return jsonify({"message": "No configuration found"})
+
+# Load configuration from file
+if os.path.exists("config.json"):
+    with open("config.json", "r") as config_file:
+        config_data = json.load(config_file)
+        SONARR_API_KEY = config_data.get("sonarr_api_key", "")
+        RADARR_API_KEY = config_data.get("radarr_api_key", "")
+        DISCORD_BOT_TOKEN = config_data.get("discord_bot_token", "")
+        SONARR_URL = config_data.get("sonarr_url", "http://localhost:8989")
+        RADARR_URL = config_data.get("radarr_url", "http://localhost:7878")
+else:
+    SONARR_API_KEY = ""
+    RADARR_API_KEY = ""
+    DISCORD_BOT_TOKEN = ""
+    SONARR_URL = "http://localhost:8989"
+    RADARR_URL = "http://localhost:7878"
+
+# Setup ReqLarr Bot
+intents = discord.Intents.default()
+intents.messages = True
+bot = commands.Bot(command_prefix="!", intents=intents, description="ReqLarr - Movie & Series Request Bot")
 
 def log_request(user, request_type, title, status):
     cursor.execute("INSERT INTO requests (user, request_type, title, status) VALUES (?, ?, ?, ?)", (user, request_type, title, status))
@@ -74,28 +105,6 @@ async def request_series(ctx, *, title):
             log_request(ctx.author.name, "series", title, "Requested")
         else:
             await ctx.send("Failed to request the series.")
-
-# Flask Web UI for Configuration and Logging
-app = Flask(__name__)
-app.config['BASIC_AUTH_USERNAME'] = os.getenv("ADMIN_USER", "admin")
-app.config['BASIC_AUTH_PASSWORD'] = os.getenv("ADMIN_PASS", "admin")
-basic_auth = BasicAuth(app)
-
-@app.route("/logs", methods=["GET"])
-@basic_auth.required
-def get_logs():
-    cursor.execute("SELECT * FROM requests")
-    logs = cursor.fetchall()
-    return jsonify(logs)
-
-@app.route("/config", methods=["POST"])
-@basic_auth.required
-def update_config():
-    data = request.json
-    os.environ["SONARR_API_KEY"] = data.get("sonarr_api_key", SONARR_API_KEY)
-    os.environ["RADARR_API_KEY"] = data.get("radarr_api_key", RADARR_API_KEY)
-    os.environ["DISCORD_BOT_TOKEN"] = data.get("discord_bot_token", DISCORD_BOT_TOKEN)
-    return jsonify({"message": "Configuration updated successfully"})
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
