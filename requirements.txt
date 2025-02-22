@@ -1,0 +1,4 @@
+discord.py
+flask
+flask-basicauth
+requests
